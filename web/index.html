@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ghostline: files through the air</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>ghostline</h1>
+  <p class="model">MODEL GL-1 FIELD UNIT</p>
+  <p class="sub">Send a message or a small file from one device to another using only sound. No Wi-Fi, no Bluetooth, no cable.</p>
+  <div class="screen"><canvas id="spec" width="960" height="200" aria-label="Live spectrogram of the audio being played or heard"></canvas></div>
+
+  <div class="cols">
+    <section>
+      <h2>Send</h2>
+      <label for="text">Message</label>
+      <textarea id="text">Hello from across the room.</textarea>
+      <label for="file">Or a file (small ones, about 1 KB per 80 seconds)</label>
+      <input id="file" type="file">
+      <label for="rounds">Repeat the whole transmission</label>
+      <select id="rounds"><option value="1">1 time</option><option value="2" selected>2 times (recovers missed packets)</option><option value="3">3 times</option></select>
+      <button id="send">Play as sound</button>
+      <div class="pill" id="sendPill" data-state="idle" role="status">Ready to send</div>
+      <div class="bar" aria-hidden="true"><div id="sendBar"></div></div>
+      <div class="detail" id="sendDetail"></div>
+    </section>
+
+    <section>
+      <h2>Receive</h2>
+      <p style="margin:0;color:var(--muted)">Hold the sending device near this microphone, then start listening.</p>
+      <button id="listen">Start listening</button><button id="stop" class="quiet" disabled>Stop</button>
+      <div class="pill" id="recvPill" data-state="idle" role="status">Not listening</div>
+      <div class="bar meter" aria-hidden="true"><div id="meterBar"></div></div>
+      <div class="detail" id="recvDetail">Signal level</div>
+      <div id="grid" aria-hidden="true"></div>
+      <div id="out"></div>
+    </section>
+  </div>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
