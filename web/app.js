@@ -118,19 +118,29 @@ $('listen').onclick = async () => {
   if (actx.state !== 'running') { setPill('recvPill', 'idle', 'Audio engine not running'); $('recvDetail').textContent = 'Tap Start listening again.'; stream.getTracks().forEach((t) => t.stop()); return; }
   const re = new Reassembler(); let done = false;
   const dec = new Decoder(actx.sampleRate,
-    (p) => { re.add(p); showGrid(re); if (re.complete && !done) { done = true; showResult(re); } },
-    () => { lastLock = performance.now(); });
+    (p) => { pkts++; re.add(p); showGrid(re); if (re.complete && !done) { done = true; showResult(re); } },
+    () => { locks++; lastLock = performance.now(); });
   let mic, proc, mute;
   try { mic = actx.createMediaStreamSource(stream); } catch (e) { setPill('recvPill', 'idle', 'Microphone unusable'); $('recvDetail').textContent = String(e.message || e); stream.getTracks().forEach((t) => t.stop()); return; }
   proc = actx.createScriptProcessor(4096, 1, 1); mute = actx.createGain();
   mute.gain.value = 0;
-  proc.onaudioprocess = (e) => dec.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  let blocks = 0, mx = 0, pkts = 0, locks = 0;
+  const track = stream.getAudioTracks()[0], st = track ? track.getSettings() : {};
+  proc.onaudioprocess = (e) => {
+    const d = e.inputBuffer.getChannelData(0); blocks++;
+    for (let i = 0; i < d.length; i += 8) { const a = Math.abs(d[i]); if (a > mx) mx = a; }
+    dec.push(new Float32Array(d));
+  };
+  const dbgTimer = setInterval(() => {
+    $('dbg').textContent = `ctx ${actx.state} ${actx.sampleRate}Hz | mic ${st.sampleRate || '?'}Hz ${track ? track.readyState : 'no track'}${track && track.muted ? ' MUTED' : ''} | blocks ${blocks} | peak ${mx.toFixed(4)} | locks ${locks} | packets ${pkts}`;
+    mx = 0;
+  }, 500);
   mic.connect(analyser); mic.connect(proc); proc.connect(mute); mute.connect(actx.destination);
   listening = true; lastHeard = lastLock = 0;
   $('listen').disabled = true; $('stop').disabled = false; $('grid').innerHTML = ''; $('out').innerHTML = '';
   setPill('recvPill', 'idle', 'Listening, waiting for sound');
   stopListening = () => {
-    listening = false; stream.getTracks().forEach((t) => t.stop()); proc.disconnect(); mic.disconnect();
+    listening = false; clearInterval(dbgTimer); stream.getTracks().forEach((t) => t.stop()); proc.disconnect(); mic.disconnect();
     $('listen').disabled = false; $('stop').disabled = true; $('meterBar').style.width = '0';
     setPill('recvPill', 'idle', 'Not listening'); $('recvDetail').textContent = 'Signal level';
   };
