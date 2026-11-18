@@ -98,6 +98,27 @@ function showGrid(re) {
   $('recvDetail').textContent = `Heard ${re.have} of ${re.total} packets`;
 }
 
+// Live view: rebuild the text from whatever packets have arrived so far. Missing chunks show as blocks.
+function showLive(re) {
+  const live = $('live'), td = new TextDecoder();
+  live.hidden = false;
+  const meta = re.parts.get(0);
+  if (meta) {
+    const name = td.decode(meta.slice(1, 1 + meta[0]));
+    if (!/\.(txt|md|json)$/i.test(name)) { live.textContent = `(${name} is not a text file: ${re.have} of ${re.total} packets so far)`; return; }
+  }
+  let out = '', run = [];
+  const flush = () => {
+    if (!run.length) return;
+    const m = new Uint8Array(run.reduce((a, r) => a + r.length, 0)); let o = 0;
+    for (const r of run) { m.set(r, o); o += r.length; }
+    out += td.decode(m); run = [];
+  };
+  for (let q = 1; q < re.total; q++) { const part = re.parts.get(q); if (part) run.push(part); else { flush(); out += '\u2592\u2592\u2592'; } }
+  flush();
+  live.textContent = out || '(waiting for message data...)';
+}
+
 function showResult(re) {
   const { name, data } = re.result();
   const url = URL.createObjectURL(new Blob([data]));
@@ -118,7 +139,7 @@ $('listen').onclick = async () => {
   if (actx.state !== 'running') { setPill('recvPill', 'idle', 'Audio engine not running'); $('recvDetail').textContent = 'Tap Start listening again.'; stream.getTracks().forEach((t) => t.stop()); return; }
   const re = new Reassembler(); let done = false;
   const dec = new Decoder(actx.sampleRate,
-    (p) => { pkts++; re.add(p); showGrid(re); if (re.complete && !done) { done = true; showResult(re); } },
+    (p) => { pkts++; re.add(p); showGrid(re); showLive(re); if (re.complete && !done) { done = true; showResult(re); } },
     () => { locks++; lastLock = performance.now(); });
   let mic, proc, mute;
   try { mic = actx.createMediaStreamSource(stream); } catch (e) { setPill('recvPill', 'idle', 'Microphone unusable'); $('recvDetail').textContent = String(e.message || e); stream.getTracks().forEach((t) => t.stop()); return; }
@@ -137,7 +158,7 @@ $('listen').onclick = async () => {
   }, 500);
   mic.connect(analyser); mic.connect(proc); proc.connect(mute); mute.connect(actx.destination);
   listening = true; lastHeard = lastLock = 0;
-  $('listen').disabled = true; $('stop').disabled = false; $('grid').innerHTML = ''; $('out').innerHTML = '';
+  $('listen').disabled = true; $('stop').disabled = false; $('grid').innerHTML = ''; $('out').innerHTML = ''; $('live').hidden = true;
   setPill('recvPill', 'idle', 'Listening, waiting for sound');
   stopListening = () => {
     listening = false; clearInterval(dbgTimer); stream.getTracks().forEach((t) => t.stop()); proc.disconnect(); mic.disconnect();
