@@ -161,7 +161,7 @@ $('listen').onclick = async () => {
     // Turn off the browser's voice processing, or it will treat our tones as noise.
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
   } catch { setPill('recvPill', 'idle', 'Microphone blocked'); $('recvDetail').textContent = 'Allow microphone access and try again. It needs https or localhost.'; return; }
-  try { await actx.resume(); } catch {}
+  try { await actx.resume(); } catch { }
   if (actx.state !== 'running') { setPill('recvPill', 'idle', 'Audio engine not running'); $('recvDetail').textContent = 'Tap Start listening again.'; stream.getTracks().forEach((t) => t.stop()); return; }
   const re = new Reassembler(); let done = false;
   const dec = new Decoder(actx.sampleRate,
