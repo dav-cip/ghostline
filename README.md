@@ -39,7 +39,3 @@ About 12 bytes per second, so this is for messages and tiny files (1 KB takes ar
 - Faster modes: 32 tones, shorter symbols, ultrasonic band for quieter transfers
 - A CLI sender/receiver using a Node audio library
 - A retro terminal skin with an authentic modem handshake
-
-## License
-
-MIT
