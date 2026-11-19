@@ -154,6 +154,44 @@ function showResult(re) {
   setPill('recvPill', 'done', 'Complete: file received');
 }
 
+// ---- microphone capture: an AudioWorklet batches the mic into 4096-sample blocks off the main thread ----
+// (The module source is inlined as a Blob so there is no extra file to deploy. Browsers without AudioWorklet
+// fall back to the older ScriptProcessorNode.)
+const CAPTURE_WORKLET = `
+class GhostlineCapture extends AudioWorkletProcessor {
+  constructor() { super(); this.size = 4096; this.buf = new Float32Array(this.size); this.n = 0; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (ch) {
+      for (let i = 0; i < ch.length; i++) {
+        this.buf[this.n++] = ch[i];
+        if (this.n === this.size) { this.port.postMessage(this.buf, [this.buf.buffer]); this.buf = new Float32Array(this.size); this.n = 0; }
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('ghostline-capture', GhostlineCapture);`;
+let captureReady = null;
+
+async function startCapture(actx, mic, onBlock) {
+  const mute = actx.createGain(); mute.gain.value = 0; mute.connect(actx.destination); // keeps the graph pulled, makes no sound
+  let node, kind = 'worklet';
+  try {
+    if (!actx.audioWorklet || typeof AudioWorkletNode === 'undefined') throw new Error('AudioWorklet not supported');
+    captureReady ??= actx.audioWorklet.addModule(URL.createObjectURL(new Blob([CAPTURE_WORKLET], { type: 'text/javascript' })));
+    await captureReady;
+    node = new AudioWorkletNode(actx, 'ghostline-capture', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1, outputChannelCount: [1] });
+    node.port.onmessage = (e) => onBlock(e.data);
+  } catch {
+    captureReady = null; kind = 'script (fallback)';
+    node = actx.createScriptProcessor(4096, 1, 1);
+    node.onaudioprocess = (e) => onBlock(new Float32Array(e.inputBuffer.getChannelData(0)));
+  }
+  mic.connect(node); node.connect(mute);
+  return { kind, stop() { try { mic.disconnect(node); } catch {} node.disconnect(); mute.disconnect(); if (node.port) node.port.onmessage = null; } };
+}
+
 $('listen').onclick = async () => {
   const actx = audio();
   let stream;
@@ -161,34 +199,35 @@ $('listen').onclick = async () => {
     // Turn off the browser's voice processing, or it will treat our tones as noise.
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
   } catch { setPill('recvPill', 'idle', 'Microphone blocked'); $('recvDetail').textContent = 'Allow microphone access and try again. It needs https or localhost.'; return; }
-  try { await actx.resume(); } catch { }
+  try { await actx.resume(); } catch {}
   if (actx.state !== 'running') { setPill('recvPill', 'idle', 'Audio engine not running'); $('recvDetail').textContent = 'Tap Start listening again.'; stream.getTracks().forEach((t) => t.stop()); return; }
   const re = new Reassembler(); let done = false;
   const dec = new Decoder(actx.sampleRate,
     (p, m) => { pkts++; heardMode = m; re.add(p, m); showGrid(re); showLive(re); if (re.complete && !done) { done = true; showResult(re); } },
     (m) => { locks++; lastLock = performance.now(); lockMode = m; },
     $('rmode').value === 'auto' ? MODE_LIST : [MODES[$('rmode').value]]);
-  let mic, proc, mute;
+  let mic;
   try { mic = actx.createMediaStreamSource(stream); } catch (e) { setPill('recvPill', 'idle', 'Microphone unusable'); $('recvDetail').textContent = String(e.message || e); stream.getTracks().forEach((t) => t.stop()); return; }
-  proc = actx.createScriptProcessor(4096, 1, 1); mute = actx.createGain();
-  mute.gain.value = 0;
   let blocks = 0, mx = 0, pkts = 0, locks = 0, lockMode = null;
   const track = stream.getAudioTracks()[0], st = track ? track.getSettings() : {};
-  proc.onaudioprocess = (e) => {
-    const d = e.inputBuffer.getChannelData(0); blocks++;
-    for (let i = 0; i < d.length; i += 8) { const a = Math.abs(d[i]); if (a > mx) mx = a; }
-    dec.push(new Float32Array(d));
-  };
+  let cap;
+  try {
+    cap = await startCapture(actx, mic, (d) => {
+      blocks++;
+      for (let i = 0; i < d.length; i += 8) { const a = Math.abs(d[i]); if (a > mx) mx = a; }
+      dec.push(d);
+    });
+  } catch (e) { setPill('recvPill', 'idle', 'Could not start audio capture'); $('recvDetail').textContent = String(e.message || e); stream.getTracks().forEach((t) => t.stop()); return; }
   const dbgTimer = setInterval(() => {
-    $('dbg').textContent = `ctx ${actx.state} ${actx.sampleRate}Hz | mic ${st.sampleRate || '?'}Hz ${track ? track.readyState : 'no track'}${track && track.muted ? ' MUTED' : ''} | blocks ${blocks} | peak ${mx.toFixed(4)} | locks ${locks}${lockMode ? ' (' + lockMode.label + ')' : ''} | packets ${pkts}`;
+    $('dbg').textContent = `ctx ${actx.state} ${actx.sampleRate}Hz | mic ${st.sampleRate || '?'}Hz ${track ? track.readyState : 'no track'}${track && track.muted ? ' MUTED' : ''} | capture ${cap.kind} | blocks ${blocks} | peak ${mx.toFixed(4)} | locks ${locks}${lockMode ? ' (' + lockMode.label + ')' : ''} | packets ${pkts}`;
     mx = 0;
   }, 500);
-  mic.connect(analyser); mic.connect(proc); proc.connect(mute); mute.connect(actx.destination);
+  mic.connect(analyser);
   listening = true; lastHeard = lastLock = 0; heardMode = null;
   $('listen').disabled = true; $('stop').disabled = false; $('grid').innerHTML = ''; $('out').innerHTML = ''; $('live').hidden = true;
   setPill('recvPill', 'idle', 'Listening, waiting for sound');
   stopListening = () => {
-    listening = false; clearInterval(dbgTimer); stream.getTracks().forEach((t) => t.stop()); proc.disconnect(); mic.disconnect();
+    listening = false; clearInterval(dbgTimer); stream.getTracks().forEach((t) => t.stop()); cap.stop(); mic.disconnect();
     $('listen').disabled = false; $('stop').disabled = true; $('meterBar').style.width = '0';
     setPill('recvPill', 'idle', 'Not listening'); $('recvDetail').textContent = 'Signal level';
   };
