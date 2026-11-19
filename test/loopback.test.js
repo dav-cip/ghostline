@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Decoder, encodePacket } from '../src/modem.js';
+import { Decoder, encodePacket, MODE_LIST } from '../src/modem.js';
 import { makePackets, renderTransmission, Reassembler } from '../src/transfer.js';
 
 let seed = 12345;
@@ -73,4 +73,20 @@ test('survives low-frequency room rumble as loud as the signal', () => {
   const re = receive(sig, fs);
   assert.ok(re.complete);
   same(re.result().data, data);
+});
+
+test('every range mode round-trips, and a receiver listening for all modes picks the right one', () => {
+  const fs = 48000, msg = 'Hi there';
+  for (const mode of MODE_LIST) {
+    const sig = renderTransmission(makePackets('message.txt', new TextEncoder().encode(msg), 11, mode), fs, 1, mode);
+    const pad = new Float32Array(7777 + sig.length); pad.set(sig, 7777);
+    const re = new Reassembler(), heard = new Set();
+    const dec = new Decoder(fs, (p, m) => { heard.add(m.id); re.add(p, m); }, null, MODE_LIST);
+    for (let i = 0; i < pad.length; i += 4096) dec.push(pad.subarray(i, i + 4096));
+    assert.ok(re.complete, `${mode.id} did not complete`);
+    assert.deepEqual([...heard], [mode.id], `${mode.id}: wrong mode(s) decoded`);
+    const r = re.result();
+    assert.equal(r.name, 'message.txt');
+    assert.equal(new TextDecoder().decode(r.data), msg);
+  }
 });

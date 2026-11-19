@@ -20,6 +20,9 @@
       <textarea id="text">Hello from across the room.</textarea>
       <label for="file">Or a file (small ones, about 1 KB per 80 seconds)</label>
       <input id="file" type="file">
+      <label for="mode">Range (how far apart the devices are)</label>
+      <select id="mode"></select>
+      <div class="detail" id="modeInfo"></div>
       <label for="rounds">Repeat the whole transmission</label>
       <select id="rounds"><option value="1">1 time</option><option value="2" selected>2 times (recovers missed packets)</option><option value="3">3 times</option></select>
       <button id="send">Play as sound</button>
@@ -31,6 +34,8 @@
     <section>
       <h2>Receive</h2>
       <p style="margin:0;color:var(--muted)">Hold the sending device near this microphone, then start listening.</p>
+      <label for="rmode">Listen for</label>
+      <select id="rmode"></select>
       <button id="listen">Start listening</button><button id="stop" class="quiet" disabled>Stop</button>
       <div class="pill" id="recvPill" data-state="idle" role="status">Not listening</div>
       <div class="bar meter" aria-hidden="true"><div id="meterBar"></div></div>
